@@ -1,22 +1,34 @@
 import streamlit as st
-from agents import SQLiteSession, Agent, Runner, WebSearchTool
+from openai import OpenAI
+from agents import SQLiteSession, Agent, Runner, WebSearchTool, FileSearchTool
 import time
 import asyncio
 import dotenv
 
 dotenv.load_dotenv()
+client = OpenAI()
+
+VECTOR_STORE_ID = "vs_6938dee473148191a1a36f16115afd73"
 
 if "agent" not in st.session_state:
     st.session_state["agent"] = Agent(
         instructions="""
         You are a helpful assistant.
 
-        You hava access to the following tools:
-            - Web Search Tool : Use this when the user asks a questions that isn't in your training data. Use this to learn about current events
+        You have access to the following tools:
+            - Web Search Tool : Use this when the user asks a questions that isn't in your training data.
+            Use this tool when the users asks about current or future events, 
+            when you think you don't know the answer, try searching for it in the web first.
+            - File Search Tool : Use this tool when the user asks a question about facts related to themselves. 
+            Or when they ask questions about specitices files.
         """,
         name="ChatGPT Clone",
         tools=[
-            WebSearchTool()   
+            WebSearchTool(),
+            FileSearchTool(
+                vector_store_ids=[VECTOR_STORE_ID],
+                max_num_results=3,
+            )
         ]
     )
 
@@ -58,6 +70,15 @@ def update_status(status_container, event):
             "running",
         ),
         "response.completed": (" ", "complete"),
+        "response.file_search_call.completed": ("✅ File search completed.", "complete"),
+        "response.file_search_call.in_progress": (
+            "🔍 Starting file search...",
+            "running",
+        ),
+        "response.file_search_call.searching": (
+            "🔍 File search in progress...",
+            "running",
+        ),
     }
 
     if event in status_messages:
@@ -84,12 +105,31 @@ async def run_agent(message):
                     text_placeholder.write(response)
     
 
-prompt = st.chat_input("Write a message for your assistant")
+prompt = st.chat_input("Write a message for your assistant",
+    accept_file=True,
+    file_type=["txt", "json"]
+)
 
 if prompt:
-    with st.chat_message("human"):
-        st.write(prompt)
-    asyncio.run(run_agent(prompt))    
+
+    for file in prompt.files:
+        with st.chat_message("ai"):
+            with st.status("⏳Uploading file...", expanded=False) as status:
+                upload_file = client.files.create(
+                    file=(file.name, file.getvalue()),
+                    purpose="user_data"
+                )
+                client.vector_stores.files.create(
+                    file_id=upload_file.id,
+                    vector_store_id=VECTOR_STORE_ID
+                )
+                status.update(label="✅ File uploaded.", state="complete")
+
+    if prompt.text:
+        with st.chat_message("human"):
+            st.write(prompt.text)
+        asyncio.run(run_agent(prompt.text))    
+
 
 
 with st.sidebar:
