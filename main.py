@@ -51,14 +51,14 @@ async def paint_history():
                 content = message["content"]
                 with st.chat_message("human"):
                     if isinstance(content, str):
-                        st.write(content.replace("$", "\$"))
+                        st.write(content.replace("$", r"\$"))
                     elif isinstance(content, list):
                         for item in content:
                             if "image_url" in item:
                                 st.image(item["image_url"])
             elif message["role"] == "assistant":
                 with st.chat_message("ai"):
-                    st.write(message["content"][0]["text"].replace("$", "\$"))
+                    st.write(message["content"][0]["text"].replace("$", r"\$"))
         if "type" in message:
             if message["type"] == "web_search_call":
                 with st.chat_message("ai"):
