@@ -28,19 +28,19 @@ if "agent" not in st.session_state:
             FileSearchTool(
                 vector_store_ids=[VECTOR_STORE_ID],
                 max_num_results=3,
-            )
-        ]
+            ),
+        ],
     )
 
 agent = st.session_state["agent"]
 
 if "session" not in st.session_state:
     st.session_state["session"] = SQLiteSession(
-        "chat-history",
-        "chat-gpt-clone-memory.db"
+        "chat-history", "chat-gpt-clone-memory.db"
     )
 
 session = st.session_state["session"]
+
 
 async def paint_history():
     message = await session.get_items()
@@ -51,14 +51,17 @@ async def paint_history():
                     st.write(message["content"])
             elif message["role"] == "assistant":
                 with st.chat_message("ai"):
-                    st.write(message["content"][0]["text"])
+                    st.write(message["content"][0]["text"].replace("$", "\$"))
         if "type" in message:
             if message["type"] == "web_search_call":
                 with st.chat_message("ai"):
                     st.write("🔍 Searching the web...")
+            elif message["type"] == "file_search_call":
+                with st.chat_message("ai"):
+                    st.write("🗄️ Searching the file...")
+
 
 def update_status(status_container, event):
-
     status_messages = {
         "response.web_search_call.completed": ("✅ Web search completed.", "complete"),
         "response.web_search_call.in_progress": (
@@ -70,7 +73,10 @@ def update_status(status_container, event):
             "running",
         ),
         "response.completed": (" ", "complete"),
-        "response.file_search_call.completed": ("✅ File search completed.", "complete"),
+        "response.file_search_call.completed": (
+            "✅ File search completed.",
+            "complete",
+        ),
         "response.file_search_call.in_progress": (
             "🔍 Starting file search...",
             "running",
@@ -85,12 +91,13 @@ def update_status(status_container, event):
         label, state = status_messages[event]
         status_container.update(label=label, state=state)
 
+
 asyncio.run(paint_history())
 
 
 async def run_agent(message):
     with st.chat_message("ai"):
-        status_container = st.status("⏳",expanded=False)
+        status_container = st.status("⏳", expanded=False)
         text_placeholder = st.empty()
         response = ""
 
@@ -99,37 +106,37 @@ async def run_agent(message):
         async for event in stream.stream_events():
             if event.type == "raw_response_event":
                 update_status(status_container, event.data.type)
-                
+
                 if event.data.type == "response.output_text.delta":
                     response += event.data.delta
                     text_placeholder.write(response)
-    
 
-prompt = st.chat_input("Write a message for your assistant",
-    accept_file=True,
-    file_type=["txt", "json"]
+
+prompt = st.chat_input(
+    "Write a message for your assistant", accept_file=True, file_type=["txt", "json"]
 )
 
 if prompt:
-
-    for file in prompt.files:
-        with st.chat_message("ai"):
-            with st.status("⏳Uploading file...", expanded=False) as status:
-                upload_file = client.files.create(
-                    file=(file.name, file.getvalue()),
-                    purpose="user_data"
-                )
-                client.vector_stores.files.create(
-                    file_id=upload_file.id,
-                    vector_store_id=VECTOR_STORE_ID
-                )
-                status.update(label="✅ File uploaded.", state="complete")
-
     if prompt.text:
         with st.chat_message("human"):
             st.write(prompt.text)
-        asyncio.run(run_agent(prompt.text))    
 
+    for file in prompt.files:
+        with st.chat_message("ai"):
+            with st.status("⏳ Uploading file...", expanded=False) as status:
+                upload_file = client.files.create(
+                    file=(file.name, file.getvalue()), purpose="user_data"
+                )
+                status.update(label="⏳ Attaching file..")
+                client.vector_stores.files.create(
+                    file_id=upload_file.id, vector_store_id=VECTOR_STORE_ID
+                )
+                status.update(label="⏳ Indexing file...")
+                time.sleep(10)
+                status.update(label="✅ File ready.", state="complete")
+
+    if prompt.text:
+        asyncio.run(run_agent(prompt.text))
 
 
 with st.sidebar:
