@@ -4,6 +4,7 @@ from agents import SQLiteSession, Agent, Runner, WebSearchTool, FileSearchTool
 import time
 import asyncio
 import dotenv
+import base64
 
 dotenv.load_dotenv()
 client = OpenAI()
@@ -47,8 +48,14 @@ async def paint_history():
     for message in message:
         if "role" in message:
             if message["role"] == "user":
+                content = message["content"]
                 with st.chat_message("human"):
-                    st.write(message["content"])
+                    if isinstance(content, str):
+                        st.write(content.replace("$", "\$"))
+                    elif isinstance(content, list):
+                        for item in content:
+                            if "image_url" in item:
+                                st.image(item["image_url"])
             elif message["role"] == "assistant":
                 with st.chat_message("ai"):
                     st.write(message["content"][0]["text"].replace("$", "\$"))
@@ -113,7 +120,16 @@ async def run_agent(message):
 
 
 prompt = st.chat_input(
-    "Write a message for your assistant", accept_file=True, file_type=["txt", "json"]
+    "Write a message for your assistant",
+    accept_file=True,
+    file_type=[
+        "txt",
+        "json",
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+    ],
 )
 
 if prompt:
@@ -122,11 +138,12 @@ if prompt:
             st.write(prompt.text)
 
     for file in prompt.files:
-        with st.chat_message("ai"):
-            with st.status("⏳ Uploading file...", expanded=False) as status:
-                upload_file = client.files.create(
-                    file=(file.name, file.getvalue()), purpose="user_data"
-                )
+        if file.type.startswith("text/") or file.type.startswith("application/json"):
+            with st.chat_message("ai"):
+                with st.status("⏳ Uploading file...", expanded=False) as status:
+                    upload_file = client.files.create(
+                        file=(file.name, file.getvalue()), purpose="user_data"
+                    )
                 status.update(label="⏳ Attaching file..")
                 client.vector_stores.files.create(
                     file_id=upload_file.id, vector_store_id=VECTOR_STORE_ID
@@ -134,6 +151,31 @@ if prompt:
                 status.update(label="⏳ Indexing file...")
                 time.sleep(10)
                 status.update(label="✅ File ready.", state="complete")
+        elif file.type.startswith("image"):
+            with st.status("⏳ Uploading image...", expanded=False) as status:
+                file_bytes = file.getvalue()
+                file_base64 = base64.b64encode(file_bytes).decode("utf-8")
+                data_uri = f"data:{file.type};base64,{file_base64}"
+                asyncio.run(
+                    session.add_items(
+                        [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_image",
+                                        "detail": "auto",
+                                        "image_url": data_uri,
+                                    }
+                                ],
+                            }
+                        ]
+                    )
+                )
+
+                status.update(label="✅ Image ready.", state="complete")
+            with st.chat_message("human"):
+                st.image(data_uri)
 
     if prompt.text:
         asyncio.run(run_agent(prompt.text))
