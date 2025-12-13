@@ -1,6 +1,6 @@
 import streamlit as st
 from openai import OpenAI
-from agents import SQLiteSession, Agent, Runner, WebSearchTool, FileSearchTool
+from agents import SQLiteSession, Agent, Runner, WebSearchTool, FileSearchTool, ImageGenerationTool
 import time
 import asyncio
 import dotenv
@@ -17,19 +17,32 @@ if "agent" not in st.session_state:
         You are a helpful assistant.
 
         You have access to the following tools:
-            - Web Search Tool : Use this when the user asks a questions that isn't in your training data.
-            Use this tool when the users asks about current or future events, 
-            when you think you don't know the answer, try searching for it in the web first.
-            - File Search Tool : Use this tool when the user asks a question about facts related to themselves. 
-            Or when they ask questions about specitices files.
+            - File Search Tool : Use this tool FIRST when the user asks a question about facts related to themselves or about specific files.
+            - Web Search Tool : Use this when the user asks questions that isn't in your training data, or about current/future events.
+
+        IMPORTANT: Never give up on answering a question. Follow this strategy:
+            1. First, try File Search if the question might relate to user's files.
+            2. If File Search returns no results or insufficient information, use Web Search.
+            3. If Web Search also doesn't help, use your own knowledge and reasoning to provide the best possible answer.
+            4. For images (characters, objects, places, etc.), analyze the image visually and use Web Search to identify it. Never say "I couldn't find information in files" and stop there.
         """,
         name="ChatGPT Clone",
+        model="gpt-4o",
         tools=[
             WebSearchTool(),
             FileSearchTool(
                 vector_store_ids=[VECTOR_STORE_ID],
                 max_num_results=3,
             ),
+            # ImageGenerationTool(
+            #     tool_config={
+            #         "type" : "image_generation",
+            #         "quality": "high",
+            #         "output_format" : "jpeg",
+            #         "moderation": "low",
+            #         "partial_images": 1
+            #     }
+            # ),
         ],
     )
 
@@ -106,6 +119,8 @@ async def run_agent(message):
     with st.chat_message("ai"):
         status_container = st.status("⏳", expanded=False)
         text_placeholder = st.empty()
+        image_placeholder = st.empty()
+
         response = ""
 
         stream = Runner.run_streamed(agent, message, session=session)
@@ -117,6 +132,9 @@ async def run_agent(message):
                 if event.data.type == "response.output_text.delta":
                     response += event.data.delta
                     text_placeholder.write(response)
+                elif event.data.type == "response.image_generation_call.partial_image":
+                    image = base64.b64decode(event.data.partial_image_b64)
+                    image_placeholder.image(image)
 
 
 prompt = st.chat_input(
@@ -185,4 +203,5 @@ with st.sidebar:
     reset = st.button("Reset")
     if reset:
         asyncio.run(session.clear_session())
+        st.rerun()
     st.write(asyncio.run(session.get_items()))
