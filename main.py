@@ -7,6 +7,7 @@ from agents import (
     WebSearchTool,
     FileSearchTool,
     CodeInterpreterTool,
+    HostedMCPTool,
 )
 import time
 import asyncio
@@ -45,6 +46,15 @@ if "agent" not in st.session_state:
             CodeInterpreterTool(
                 tool_config={"type": "code_interpreter", "container": {"type": "auto"}}
             ),
+            HostedMCPTool(
+                tool_config={
+                    "server_url": "https://mcp.context7.com/mcp",
+                    "type": "mcp",
+                    "server_label": "Context7",
+                    "server_description": "Use this to get the doxs from software project",
+                    "require_approval": "never",
+                }
+            ),
         ],
     )
 
@@ -77,13 +87,19 @@ async def paint_history():
         if "type" in message:
             if message["type"] == "web_search_call":
                 with st.chat_message("ai"):
-                    st.write("🔍 Searching the web...")
+                    st.write("🔍 Searched the web...")
             elif message["type"] == "file_search_call":
                 with st.chat_message("ai"):
-                    st.write("🗄️ Searching the file...")
+                    st.write("🗄️ Searched your files...")
             elif message["type"] == "code_interpreter_call":
                 with st.chat_message("ai"):
                     st.code(message["code"])
+            elif message["type"] == "mcp_list_tools":
+                with st.chat_message("ai"):
+                    st.write(f"Listed {message["server_label"]}'s tools")
+            elif message["type"] == "mcp_call":
+                with st.chat_message("ai"):
+                    st.write(f"Called {message["server_label"]}'s {message["name"]} with args {message["arguments"]}")
 
 
 def update_status(status_container, event):
@@ -120,6 +136,10 @@ def update_status(status_container, event):
             "🤖 Running code...",
             "complete",
         ),
+        "response.mcp_call.in_progress": ("⚒️ Calling MCP tool...", "running"),
+        "response.mcp_list_tools.in_progress": ("⚒️ Listing MCP Tools", "running"),
+        "response.mcp_list_tools.completed": ("⚒️ Listed MCP Tools", "complete"),
+        "response.mcp_list_tools.failed": ("⚒️ Error Listing MCP Tools", "complete"),
         "response.complete": (" ", "complete"),
     }
 
