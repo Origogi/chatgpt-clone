@@ -8,7 +8,6 @@ from agents import (
     FileSearchTool,
     CodeInterpreterTool,
     HostedMCPTool,
-    
 )
 from agents.mcp.server import MCPServerStdio
 import time
@@ -121,17 +120,30 @@ asyncio.run(paint_history())
 async def run_agent(message):
     yfinance_server = MCPServerStdio(
         params={
-            "command" : "uvx",
-            "args" : ["mcp-yahoo-finance"],
+            "command": "uvx",
+            "args": ["mcp-yahoo-finance"],
         },
         cache_tools_list=True,
         client_session_timeout_seconds=30,
     )
 
-    async with yfinance_server:
+    timezone_server = MCPServerStdio(
+        params={
+            "command": "uvx",
+            "args": [
+                "mcp-server-time",
+                "--local-timezone=America/New_York",
+            ],
+        }
+    )
+
+    async with yfinance_server, timezone_server:
         agent = Agent(
-        mcp_servers=[yfinance_server],
-        instructions="""
+            mcp_servers=[
+                yfinance_server,
+                timezone_server,
+            ],
+            instructions="""
         You are a helpful assistant.
 
         You have access to the following tools:
@@ -145,28 +157,31 @@ async def run_agent(message):
             3. If Web Search also doesn't help, use your own knowledge and reasoning to provide the best possible answer.
             4. For images (characters, objects, places, etc.), analyze the image visually and use Web Search to identify it. Never say "I couldn't find information in files" and stop there.
         """,
-        name="ChatGPT Clone",
-        model="gpt-4o",
-        tools=[
-            WebSearchTool(),
-            FileSearchTool(
-                vector_store_ids=[VECTOR_STORE_ID],
-                max_num_results=3,
-            ),
-            CodeInterpreterTool(
-                tool_config={"type": "code_interpreter", "container": {"type": "auto"}}
-            ),
-            HostedMCPTool(
-                tool_config={
-                    "server_url": "https://mcp.context7.com/mcp",
-                    "type": "mcp",
-                    "server_label": "Context7",
-                    "server_description": "Use this to get the doxs from software project",
-                    "require_approval": "never",
-                }
-            ),
-        ],
-    )
+            name="ChatGPT Clone",
+            model="gpt-4o",
+            tools=[
+                WebSearchTool(),
+                FileSearchTool(
+                    vector_store_ids=[VECTOR_STORE_ID],
+                    max_num_results=3,
+                ),
+                CodeInterpreterTool(
+                    tool_config={
+                        "type": "code_interpreter",
+                        "container": {"type": "auto"},
+                    }
+                ),
+                HostedMCPTool(
+                    tool_config={
+                        "server_url": "https://mcp.context7.com/mcp",
+                        "type": "mcp",
+                        "server_label": "Context7",
+                        "server_description": "Use this to get the doxs from software project",
+                        "require_approval": "never",
+                    }
+                ),
+            ],
+        )
 
         with st.chat_message("ai"):
             status_container = st.status("⏳", expanded=False)

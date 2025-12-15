@@ -1,0 +1,9 @@
+{
+  "editor.fontFamily": "Space Mono",
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 1000,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true
+  }
+}
