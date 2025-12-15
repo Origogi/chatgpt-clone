@@ -8,7 +8,9 @@ from agents import (
     FileSearchTool,
     CodeInterpreterTool,
     HostedMCPTool,
+    
 )
+from agents.mcp.server import MCPServerStdio
 import time
 import asyncio
 import dotenv
@@ -19,50 +21,11 @@ client = OpenAI()
 
 VECTOR_STORE_ID = "vs_6938dee473148191a1a36f16115afd73"
 
-if "agent" not in st.session_state:
-    st.session_state["agent"] = Agent(
-        instructions="""
-        You are a helpful assistant.
-
-        You have access to the following tools:
-            - File Search Tool : Use this tool FIRST when the user asks a question about facts related to themselves or about specific files.
-            - Web Search Tool : Use this when the user asks questions that isn't in your training data, or about current/future events.
-            - Code Interpreter : Use this tool when you need to write and run code to answer the user's question.
-
-        IMPORTANT: Never give up on answering a question. Follow this strategy:
-            1. First, try File Search if the question might relate to user's files.
-            2. If File Search returns no results or insufficient information, use Web Search.
-            3. If Web Search also doesn't help, use your own knowledge and reasoning to provide the best possible answer.
-            4. For images (characters, objects, places, etc.), analyze the image visually and use Web Search to identify it. Never say "I couldn't find information in files" and stop there.
-        """,
-        name="ChatGPT Clone",
-        model="gpt-4o",
-        tools=[
-            WebSearchTool(),
-            FileSearchTool(
-                vector_store_ids=[VECTOR_STORE_ID],
-                max_num_results=3,
-            ),
-            CodeInterpreterTool(
-                tool_config={"type": "code_interpreter", "container": {"type": "auto"}}
-            ),
-            HostedMCPTool(
-                tool_config={
-                    "server_url": "https://mcp.context7.com/mcp",
-                    "type": "mcp",
-                    "server_label": "Context7",
-                    "server_description": "Use this to get the doxs from software project",
-                    "require_approval": "never",
-                }
-            ),
-        ],
-    )
-
-agent = st.session_state["agent"]
 
 if "session" not in st.session_state:
     st.session_state["session"] = SQLiteSession(
-        "chat-history", "chat-gpt-clone-memory.db"
+        "chat-history",
+        "chat-gpt-clone-memory.db",
     )
 
 session = st.session_state["session"]
@@ -96,10 +59,12 @@ async def paint_history():
                     st.code(message["code"])
             elif message["type"] == "mcp_list_tools":
                 with st.chat_message("ai"):
-                    st.write(f"Listed {message["server_label"]}'s tools")
+                    st.write(f"Listed {message['server_label']}'s tools")
             elif message["type"] == "mcp_call":
                 with st.chat_message("ai"):
-                    st.write(f"Called {message["server_label"]}'s {message["name"]} with args {message["arguments"]}")
+                    st.write(
+                        f"Called {message['server_label']}'s {message['name']} with args {message['arguments']}"
+                    )
 
 
 def update_status(status_container, event):
@@ -137,9 +102,11 @@ def update_status(status_container, event):
             "complete",
         ),
         "response.mcp_call.in_progress": ("⚒️ Calling MCP tool...", "running"),
+        "response.mcp_call.completed": ("✅ MCP tool completed.", "complete"),
         "response.mcp_list_tools.in_progress": ("⚒️ Listing MCP Tools", "running"),
         "response.mcp_list_tools.completed": ("⚒️ Listed MCP Tools", "complete"),
         "response.mcp_list_tools.failed": ("⚒️ Error Listing MCP Tools", "complete"),
+        "response.function_call_output": ("📤 Function output received.", "complete"),
         "response.complete": (" ", "complete"),
     }
 
@@ -152,29 +119,78 @@ asyncio.run(paint_history())
 
 
 async def run_agent(message):
-    with st.chat_message("ai"):
-        status_container = st.status("⏳", expanded=False)
-        code_placeholder = st.empty()
-        text_placeholder = st.empty()
+    yfinance_server = MCPServerStdio(
+        params={
+            "command" : "uvx",
+            "args" : ["mcp-yahoo-finance"],
+        },
+        cache_tools_list=True,
+        client_session_timeout_seconds=30,
+    )
 
-        st.session_state["code_placeholder"] = code_placeholder
-        st.session_state["text_placeholder"] = text_placeholder
+    async with yfinance_server:
+        agent = Agent(
+        mcp_servers=[yfinance_server],
+        instructions="""
+        You are a helpful assistant.
 
-        response = ""
-        code_response = ""
+        You have access to the following tools:
+            - File Search Tool : Use this tool FIRST when the user asks a question about facts related to themselves or about specific files.
+            - Web Search Tool : Use this when the user asks questions that isn't in your training data, or about current/future events.
+            - Code Interpreter : Use this tool when you need to write and run code to answer the user's question.
 
-        stream = Runner.run_streamed(agent, message, session=session)
+        IMPORTANT: Never give up on answering a question. Follow this strategy:
+            1. First, try File Search if the question might relate to user's files.
+            2. If File Search returns no results or insufficient information, use Web Search.
+            3. If Web Search also doesn't help, use your own knowledge and reasoning to provide the best possible answer.
+            4. For images (characters, objects, places, etc.), analyze the image visually and use Web Search to identify it. Never say "I couldn't find information in files" and stop there.
+        """,
+        name="ChatGPT Clone",
+        model="gpt-4o",
+        tools=[
+            WebSearchTool(),
+            FileSearchTool(
+                vector_store_ids=[VECTOR_STORE_ID],
+                max_num_results=3,
+            ),
+            CodeInterpreterTool(
+                tool_config={"type": "code_interpreter", "container": {"type": "auto"}}
+            ),
+            HostedMCPTool(
+                tool_config={
+                    "server_url": "https://mcp.context7.com/mcp",
+                    "type": "mcp",
+                    "server_label": "Context7",
+                    "server_description": "Use this to get the doxs from software project",
+                    "require_approval": "never",
+                }
+            ),
+        ],
+    )
 
-        async for event in stream.stream_events():
-            if event.type == "raw_response_event":
-                update_status(status_container, event.data.type)
+        with st.chat_message("ai"):
+            status_container = st.status("⏳", expanded=False)
+            code_placeholder = st.empty()
+            text_placeholder = st.empty()
 
-                if event.data.type == "response.output_text.delta":
-                    response += event.data.delta
-                    text_placeholder.write(response)
-                elif event.data.type == "response.code_interpreter_call_code.delta":
-                    code_response += event.data.delta
-                    code_placeholder.code(code_response)
+            st.session_state["code_placeholder"] = code_placeholder
+            st.session_state["text_placeholder"] = text_placeholder
+
+            response = ""
+            code_response = ""
+
+            stream = Runner.run_streamed(agent, message, session=session)
+
+            async for event in stream.stream_events():
+                if event.type == "raw_response_event":
+                    update_status(status_container, event.data.type)
+
+                    if event.data.type == "response.output_text.delta":
+                        response += event.data.delta
+                        text_placeholder.write(response)
+                    elif event.data.type == "response.code_interpreter_call_code.delta":
+                        code_response += event.data.delta
+                        code_placeholder.code(code_response)
 
 
 prompt = st.chat_input(

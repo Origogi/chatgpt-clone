@@ -13,6 +13,14 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "add-trailing-comma>=4.0.0",
     "ipykernel>=6.30.1",
     "ruff>=0.14.9",
 ]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.format]
+quote-style = "double"
+skip-magic-trailing-comma = false
